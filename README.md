@@ -1,3 +1,4 @@
+**LIVE:** [LINK](https://ai-teacher-agent.vercel.app/) 
 # AI Teacher Agent - Economics Tutor (Oligopoly)
 
 A specialized AI tutoring agent built with Next.js 16 that focuses strictly on the **Oligopoly Market Structure**. This application uses Google's Gemini 2.0 Flash model to act as a strict, focused economics teacher, utilizing a "context-stuffing" approach to ensure responses remain factual and within the bounds of the provided curriculum.
@@ -38,7 +39,7 @@ Follow these steps to run the project locally.
 ### 1. Clone the repository
 
 ```bash
-git clone [https://github.com/vansh275/AiTeacher-agent.git](https://github.com/vansh275/AiTeacher-agent.git)
+git clone (https://github.com/vansh275/AiTeacher-agent.git)
 ### 2. move to AiTeacher-agent
 cd AiTeacher-agent
 ### 3. install dependencies
