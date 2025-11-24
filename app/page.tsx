@@ -1,5 +1,6 @@
 'use client'
 import React, { useState, useEffect, useRef } from 'react';
+import SpeechRecognition, { useSpeechRecognition } from 'react-speech-recognition';
 
 // =================================================================
 // 1. DETAILED CONTEXT (The Agent's Knowledge Base)
@@ -97,21 +98,110 @@ export default function Home() {
   const [messages, setMessages] = useState<Message[]>(INITIAL_MESSAGES);
   const [inputText, setInputText] = useState<string>("");
   const [isTyping, setIsTyping] = useState<boolean>(false);
+  const [isSpeaking, setIsSpeaking] = useState<boolean>(false);
+  const [isTalking, setIsTalking] = useState<boolean>(false);
+  // const [text, setText] = useState<string>('');
   const messagesEndRef = useRef<HTMLDivElement>(null);
+
+  const {
+    transcript,
+    listening,
+    resetTranscript,
+    browserSupportsSpeechRecognition
+  } = useSpeechRecognition();
+
+  if (!browserSupportsSpeechRecognition) {
+    console.log("Browser doesn't support speech recognition.");
+  }
 
   // Auto
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   };
 
+  //text to speak
+  const speakText = (text: string) => {
+    if ('speechSynthesis' in window) {
+      window.speechSynthesis.cancel()
+      setIsSpeaking(true);
+      const utterance = new SpeechSynthesisUtterance(text);
+      utterance.rate = 1.5;
+      utterance.onend = () => {
+        setIsSpeaking(false); // Close the popup
+        if (isTalking) {
+          handleMicRestart();
+        }
+      };
+      utterance.onerror = (event) => {
+        console.error('Speech synthesis error:', event);
+        setIsSpeaking(false); // Close the popup on error
+      };
+      window.speechSynthesis.speak(utterance);
+    } else {
+      alert('Your browser does not support the Web Speech API.');
+    }
+  };
+  const handleMicRestart = () => {
+    setInputText('');
+    resetTranscript();
+    // Only start listening if the modal is still open
+    if (isTalking) {
+      SpeechRecognition.startListening({ continuous: true });
+    }
+  };
+  const openVoiceModal = () => {
+    setIsTalking(true);
+    // Start listening immediately upon opening
+    SpeechRecognition.startListening({ continuous: true });
+  };
+  const closeVoiceModal = () => {
+    // Stop mic
+    SpeechRecognition.stopListening();
+    //Hide modal
+    setIsTalking(false);
+    // Clear transcript/input text that hasn't been sent
+    setInputText('');
+    resetTranscript();
+    cancelSpeech();
+  };
+  const cancelSpeech = () => {
+    if ('speechSynthesis' in window) {
+      window.speechSynthesis.cancel(); // Stop the voice
+      setIsSpeaking(false);       // Close the popup
+    }
+  };
+  useEffect(() => {
+    if (listening) {
+      setInputText(transcript);
+    }
+    // When listening stops, the last recorded transcript stays in inputText until the user sends it or clears it.
+  }, [transcript, listening]);
+  const toggleListening = () => {
+    if (listening) {
+      SpeechRecognition.stopListening();
+    } else {
+      // Clear previous text before starting
+      setInputText('');
+      resetTranscript();
+      SpeechRecognition.startListening({
+        continuous: true,
+      });
+    }
+  };
+  const handleReset = () => {
+    setInputText('');
+    resetTranscript();
+  };
+
+
   useEffect(() => {
     scrollToBottom();
   }, [messages, isTyping]);
-
-  const handleSendMessage = async (e: React.FormEvent<HTMLFormElement>) => {
-    e.preventDefault();
+  const sendMessageToAI = async (clearInput: boolean) => {
     const trimmedInput = inputText.trim();
     if (!trimmedInput) return;
+
+    cancelSpeech();
 
     const newUserMessage: Message = {
       id: Date.now(),
@@ -124,21 +214,22 @@ export default function Home() {
 
     // Update the UI
     setMessages(historyBeforeCall);
-    setInputText("");
+    if (clearInput) {
+      setInputText("");
+    }
     setIsTyping(true); //for response
 
     // Check if this is the very first API call 
     // (history has the model's initial message + the new user message)
     const isFirstCall = historyBeforeCall.length === INITIAL_MESSAGES.length + 1;
 
-    // 1. Prepare the payload structure
+    //Prepare the payload structure
     const conversationHistory = historyBeforeCall.map(msg => ({
       role: msg.sender,
       parts: [{ text: msg.text }]
     }));
 
-    // 2. PROMPT STUFFING LOGIC (The "Code B" Strategy)
-    // Instead of sending rules separately, we force them into the text of the first message.
+    //PROMPT STUFFING LOGIC 
     if (isFirstCall) {
       // Find the index of the message the user just sent (it should be the last one)
       const lastMsgIndex = conversationHistory.length - 1;
@@ -174,7 +265,7 @@ ${userOriginalQuestion}
         })
       });
 
-      // 3. Handle the API response
+      //Handle the API response
       const data = await response.json();
 
       if (response.ok) {
@@ -185,6 +276,9 @@ ${userOriginalQuestion}
           time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
         };
         setMessages(prev => [...prev, aiReply]);
+        if (isTalking) {
+          speakText(data.text);
+        }
       } else {
         console.error("API Call Error:", data.message);
         const errorMessage: Message = {
@@ -208,6 +302,16 @@ ${userOriginalQuestion}
     } finally {
       setIsTyping(false);
     }
+
+  }
+  const handleSendMessage = async (e: React.FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    await sendMessageToAI(true);
+  };
+  const handleModalSend = async () => {
+    // Stop mic
+    SpeechRecognition.stopListening();
+    await sendMessageToAI(false);
   };
 
   return (
@@ -229,17 +333,36 @@ ${userOriginalQuestion}
             className={`flex w-full ${msg.sender === 'user' ? 'justify-end' : 'justify-start'}`}
           >
             <div
-              className={`max-w-[75%] px-4 py-3 rounded-xl shadow-sm transition-all duration-300
-                                ${msg.sender === 'user'
+              className={`max-w-[75%] px-4 py-3 rounded-xl shadow-sm transition-all duration-300 relative
+          ${msg.sender === 'user'
                   ? 'bg-blue-600 text-white rounded-br-none'
                   : 'bg-gray-100 text-gray-800 rounded-tl-none border border-gray-200'
                 }`}
             >
-              <p className="text-sm sm:text-base whitespace-pre-wrap">{msg.text}</p>
+
+              {/* Play Button */}
+              <button
+                onClick={() => speakText(msg.text)} // ⭐️ Key change: Call speakText with message content
+                title="Listen to message"
+                disabled={isSpeaking}
+                className={`absolute top-0 transform -translate-y-1/2 p-1 rounded-full text-xs shadow-md z-10 
+            ${msg.sender === 'user'
+                    ? 'left-0 ml-1 bg-blue-400 hover:bg-blue-300 text-white'
+                    : 'right-0 mr-1 bg-gray-300 hover:bg-gray-400 text-gray-800' // Position based on sender
+                  }`}
+              >
+                🔊 {/* Speaker Icon */}
+              </button>
+
+              {/* Message Content */}
+              <p className="text-sm sm:text-base whitespace-pre-wrap mt-2">{msg.text}</p>
+
+              {/* Time Stamp */}
               <p className={`text-xs mt-1 ${msg.sender === 'user' ? 'text-blue-200' : 'text-gray-500'} text-right`}>{msg.time}</p>
             </div>
           </div>
         ))}
+
 
         {isTyping && (
           <div className="flex justify-start">
@@ -251,9 +374,73 @@ ${userOriginalQuestion}
         <div ref={messagesEndRef} />
       </div>
 
+      {/* ⭐️ SPEAKING POPUP / MODAL */}
+      {isSpeaking && !isTalking && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white p-6 rounded-lg shadow-2xl flex items-center space-x-4">
+            <span className="text-lg font-semibold text-gray-800">
+              🗣️ Speaking...
+            </span>
+            <button
+              onClick={cancelSpeech} // Calls the function to stop voice and close popup
+              className="px-4 py-2 bg-red-500 text-white rounded-md hover:bg-red-600 transition duration-150 shadow-md"
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Input field */}
       <div className="p-4 border-t border-gray-300 bg-white sticky bottom-0 rounded-b-xl">
         <form onSubmit={handleSendMessage} className="flex gap-3">
+          {/* 1. Mic Toggle Button */}
+          <button
+            type="button" // Important: Prevents form submission
+            onClick={toggleListening}
+            title={listening ? "Stop Dictation" : "Start Dictation"}
+            disabled={!browserSupportsSpeechRecognition || isTyping}
+            className={`p-3 rounded-xl transition duration-150 shadow-md shrink-0
+              ${!browserSupportsSpeechRecognition || isTyping
+                ? 'bg-gray-200 text-gray-400 cursor-not-allowed'
+                : listening
+                  ? 'bg-red-500 text-white animate-pulse' // Pulsing red when listening
+                  : 'bg-gray-100 text-gray-700 hover:bg-gray-200' // Default gray
+              }`}
+          >
+            {listening ? '🔴' : '🎤'}
+          </button>
+
+          {/* 2. Reset Button */}
+          <button
+            type="button" // Important: Prevents form submission
+            onClick={handleReset}
+            title="Clear Input"
+            disabled={isTyping || !inputText.length}
+            className={`p-3 rounded-xl transition duration-150 shadow-md shrink-0
+              ${isTyping || !inputText.length
+                ? 'bg-gray-200 text-gray-400 cursor-not-allowed'
+                : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+              }`}
+          >
+            ❌
+          </button>
+          {/* ⭐️ NEW: Conversation Mode Button */}
+          <button
+            type="button"
+            onClick={openVoiceModal}
+            title="Start Voice Conversation Mode"
+            disabled={isTyping}
+            className={`p-3 rounded-xl transition duration-150 shadow-md shrink-0
+            ${isTyping
+                ? 'bg-gray-200 text-gray-400 cursor-not-allowed'
+                : 'bg-yellow-500 text-white hover:bg-yellow-600'
+              }`}
+          >
+            🗣️
+          </button>
+
+
           <input
             type="text"
             value={inputText}
@@ -275,6 +462,62 @@ ${userOriginalQuestion}
           </button>
         </form>
       </div>
+      {/* ⭐️ VOICE CONVERSATION MODAL */}
+      {isTalking && (
+        <div className="fixed inset-0 bg-black bg-opacity-70 flex flex-col items-center justify-center z-50 p-4">
+          <div className="bg-white p-8 rounded-xl shadow-2xl w-full max-w-md space-y-4">
+            <h2 className="text-xl font-bold text-center text-blue-600">
+              Turn-Taking Conversation Mode
+            </h2>
+
+            <p className="text-center text-gray-700 font-semibold flex items-center justify-center space-x-2">
+              {listening ? (
+                <>
+                  <span className="animate-pulse text-red-500">🔴</span>
+                  <span>Listening... Speak your question now.</span>
+                </>
+              ) : isSpeaking ? (
+                <>
+                  <span className="animate-bounce text-green-600">🗣️</span>
+                  <span>Tutor is speaking...</span>
+                </>
+              ) : (
+                <>
+                  <span className="text-gray-500">...</span>
+                  <span>Processing response.</span>
+                </>
+              )}
+            </p>
+
+            <div className="bg-gray-100 p-4 rounded-lg border border-gray-300 min-h-[50px] overflow-auto max-h-40">
+              <p className="text-sm text-gray-800 whitespace-pre-wrap">
+                {listening ? 'Your Dictation:' : 'Input captured:'} {inputText}
+              </p>
+            </div>
+
+            <div className="flex justify-around pt-4">
+              <button
+                onClick={closeVoiceModal} // Uses the cancel logic
+                className="px-6 py-3 bg-red-500 text-white rounded-lg hover:bg-red-600 transition shadow-md"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleModalSend}
+                // Disable if not listening or if there's no text captured
+                disabled={!inputText.trim() || isTyping || isSpeaking}
+                className={`px-6 py-3 rounded-lg font-semibold transition shadow-md
+                        ${!inputText.trim() || isTyping || isSpeaking
+                    ? 'bg-gray-400 text-white cursor-not-allowed'
+                    : 'bg-green-600 text-white hover:bg-green-700'
+                  }`}
+              >
+                Send
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
