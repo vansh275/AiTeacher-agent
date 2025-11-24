@@ -7,6 +7,10 @@ A specialized AI tutoring agent built with Next.js 16 that focuses strictly on t
 
 * **Specialized Knowledge Base:** The agent is pre-prompted with detailed context regarding Oligopolies (Kinked Demand Curve, Game Theory, Concentration Ratios, etc.).
 * **Strict Persona:** The AI acts as a tutor, refusing to answer off-topic questions (e.g., general knowledge, poetry) to keep the student focused.
+* **🗣️ Audio Two-Person Dialogue Mode:** Enables a hands-free, turn-taking conversation flow where the student speaks, the AI responds via Text-to-Speech (TTS), and the microphone automatically restarts for the student's next question.
+* **🎧 Accessibility & Interaction:**
+    * **Speech-to-Text (STT):** Dictate questions directly into the chat input.
+    * **Text-to-Speech (TTS):** Play back any message from the conversation history using a dedicated speaker button on the chat bubble.
 * **Modern UI:** A clean, responsive chat interface built with React 19 and Tailwind CSS v4.
 * **Real-time Streaming:** Fast responses utilizing the Gemini 2.0 Flash API.
 * **Next.js 16:** Built on the latest Next.js App Router architecture.
@@ -17,6 +21,7 @@ A specialized AI tutoring agent built with Next.js 16 that focuses strictly on t
 * **Language:** TypeScript
 * **Styling:** [Tailwind CSS v4](https://tailwindcss.com/)
 * **AI Model:** Google Gemini 2.0 Flash (via Google Generative AI API)
+* **Voice/Speech:** `react-speech-recognition` (leveraging the native Web Speech API for VTT/TTS)
 * **State Management:** React Hooks (`useState`, `useEffect`)
 
 ## 🤖 AI-Accelerated Development
@@ -39,12 +44,20 @@ Follow these steps to run the project locally.
 ### 1. Clone the repository
 
 ```bash
-git clone (https://github.com/vansh275/AiTeacher-agent.git)
+git clone [https://github.com/vansh275/AiTeacher-agent.git](https://github.com/vansh275/AiTeacher-agent.git)
+```
 ### 2. move to AiTeacher-agent
+```bash
 cd AiTeacher-agent
+```
 ### 3. install dependencies
-npm install 
+```bash
+npm install
+```
 ### 3.1 You will need API key so make .env file and put ypu api key like this
+```bash
 API_KEY="<your_key>"
+```
 ### 4. Now run
-npm run dev
+```bash
+npm run dev```
