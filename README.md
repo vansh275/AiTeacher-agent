@@ -60,4 +60,5 @@ API_KEY="<your_key>"
 ```
 ### 4. Now run
 ```bash
-npm run dev```
+npm run dev
+```
