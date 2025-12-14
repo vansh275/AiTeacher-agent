@@ -1,86 +1,12 @@
 'use client'
-import React, { useState, useEffect, useRef } from 'react';
+
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import SpeechRecognition, { useSpeechRecognition } from 'react-speech-recognition';
 
-// =================================================================
-// 1. DETAILED CONTEXT (The Agent's Knowledge Base)
-// =================================================================
-const DETAILED_CONTEXT = `
-### Oligopoly Market Structure
+// ==========================================
+// 1. TYPES & CONSTANTS
+// ==========================================
 
-1. **Definition and Meaning**
-Literal Meaning: The term "oligopoly" comes from the Greek word oligos (meaning few), literally translating to "competition among the few."
-Behavior over Structure: While it is structurally defined as a market containing a few firms, economists prefer to define it by **market conduct (behavior)**.
-Key Characteristics:
-* **Interdependence:** This is the defining feature. Firms must take into account the likely reactions of their rivals when making decisions about price or output. Game theory is particularly useful for mapping this interdependence in detail.
-* **Uncertainty:** Because of interdependence, a firm can never be completely certain how rivals will react to its strategic moves.
-
-2. **Measuring Market Structure**
-To objectively identify an oligopoly, economists use **Concentration Ratios**, which measure the market share of the largest firms in an industry.
-Calculation: A "five-firm concentration ratio" adds up the market percentage of the five largest firms.
-Examples:
-* UK Banking: In 2021, the six largest banks had a five-firm concentration ratio of 94%.
-* Web Browsers: The European market is highly concentrated, with a four-firm ratio of over 91% (Chrome, Safari, Firefox, Edge).
-
-3. **Theoretical Models of Behavior**
-Two primary models explain how oligopolies behave, specifically regarding price stability and strategy.
-
-A. **The Kinked Demand Curve:**
-Purpose: This model explains **price rigidity**—why prices tend to stay stable even when costs change.
-The Theory:
-* If a firm raises its price, it assumes rivals will not follow. The firm loses market share, meaning demand is **elastic** (sensitive to price).
-* If a firm cuts its price, it assumes rivals will match the cut to avoid losing customers. The firm gains very few sales, meaning demand is **inelastic** (insensitive to price).
-* The "Kink": These differing assumptions create a "kink" in the demand curve at the current price. This causes a vertical gap in the **Marginal Revenue (MR) curve**, meaning **Marginal Costs (MC)** can fluctuate without changing the optimal price.
-
-B. **Game Theory (The Prisoner's Dilemma):** Purpose: This provides a more detailed analysis of strategic interdependence than the kinked demand curve.
-The Scenario: Imagine two firms (Firm A and Firm B) deciding between a High Price (£1) and a Low Price (90p).
-* **Best Joint Outcome:** Both charge High Price (e.g., £3m each).
-* **Dominant Strategy:** To avoid the "worst-case" scenario of being undercut, the rational choice for both firms is to charge the Low Price.
-* **Nash Equilibrium:** Both firms end up charging the Low Price. This creates a stable equilibrium (price rigidity) where neither has an incentive to change, even though they make less profit than if they had colluded.
-
-4. **Strategic Behavior: Competition vs. Collusion**
-Firms constantly balance the urge to compete against the temptation to collude.
-
-* **Competitive (Non-Collusive) Oligopoly:** Firms act independently. Prices often stay stable (Price Rigidity), leading to **Non-Price Competition** (branding, advertising, service, and product quality).
-* **Collusive Oligopoly:** Firms cooperate to reduce uncertainty and maximize joint profits, effectively acting like a monopoly.
-    * **Cartels:** A formal agreement (often illegal) to fix prices or restrict output. They aim for Joint-Profit Maximization, setting industry output where industry **Marginal Revenue** equals **Marginal Cost**.
-    * **The Incentive to Cheat:** Game theory shows that collusion is unstable. Every member has a strong financial incentive to secretly undercut the others (cheat) to steal market share and boost profit.
-
-5. **Pricing Strategies**
-* **Price Leadership:** A form of tacit collusion where a dominant firm sets the price and smaller firms follow.
-* **Price Wars:** Firms continuously cut prices to undercut rivals, which benefits consumers short-term but can lead to less competition later.
-* **Price Discrimination:** Charging different prices to different consumers for the same product based on willingness to pay.
-
-6. **Advantages and Disadvantages**
-* **Advantages:** Economies of Scale, Innovation (dynamic efficiency), and simplicity in consumer choices.
-* **Disadvantages:** High Prices (due to collusion), Inefficiency (cartels protect weak firms), and high **Barriers to Entry** for new competitors.
-
-7. **Real-World Applications**
-* Supermarkets: "Hard discounters" (Aldi, Lidl) compete on low costs, making it hard for traditional giants (Tesco) to compete purely on price.
-* Book Market: The shift from fixed prices (Retail Price Maintenance) to aggressive discounting by giants (Amazon) has forced many small independent bookshops to close.
-* Regulation: Some countries ban heavy discounting (e.g., France on books) to protect small shops.
-`;
-
-// =================================================================
-// 2. SYSTEM INSTRUCTION (The Agent's Persona and Rules)
-// =================================================================
-
-const SYSTEM_INSTRUCTION = `
-# YOUR ROLE: Specialized Economics Tutor
-You are a strict and focused Economics Tutor specializing in the Oligopoly Market Structure. Your goal is to teach the user using *only* the provided context.
-
-## **CORE DIRECTIVES**
-1. **SOURCE OF TRUTH:** You must ONLY use the "Detailed Context" provided below to answer questions. Do not use external knowledge about other economic topics or general world knowledge.
-2. **STRICTLY ON-TOPIC:** You must refuse to answer any question that is not related to Oligopolies or the provided text.
-3. **TEACHER PERSONA:** Explain concepts clearly using the definitions provided. Use headings and bullet points for readability.
-
-## **BEHAVIORAL RULES**
-* **Refusal:** If the user asks an off-topic question (e.g., "What is the capital of France?", "Write me a poem", "What is Perfect Competition?"), you MUST politely refuse.
-    * *Refusal Example:* "I am specialized only in the Oligopoly market structure. I cannot assist with other topics. Let's discuss Kinked Demand Curves or Game Theory instead."
-* **Context adherence:** If the answer is not in the text provided, state that the information is not available in your current knowledge base.
-`;
-
-// 3. Define the Message Interface/Type
 interface Message {
   id: number;
   sender: 'user' | 'model';
@@ -88,20 +14,155 @@ interface Message {
   time: string;
 }
 
-//Initial Data
+type AppMode = 'idle' | 'dictation' | 'live';
+
 const CONTACT = { id: 1, name: "Economics Tutor (Oligopoly)", status: "Online" };
+
 const INITIAL_MESSAGES: Message[] = [
-  { id: 1, sender: 'model', text: "Welcome! I am your tutor on the topic of Oligopoly. Ask me anything about the provided economic context.", time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) },
+  { id: 1, sender: 'model', text: "Welcome! I am your tutor on the topic of Oligopoly. Ask me anything.", time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) },
 ];
 
-export default function Home() {
-  const [messages, setMessages] = useState<Message[]>(INITIAL_MESSAGES);
-  const [inputText, setInputText] = useState<string>("");
-  const [isTyping, setIsTyping] = useState<boolean>(false);
-  const [isSpeaking, setIsSpeaking] = useState<boolean>(false);
-  const [isTalking, setIsTalking] = useState<boolean>(false);
-  // const [text, setText] = useState<string>('');
+// ==========================================
+// 2. CUSTOM HOOK: Text-To-Speech (TTS)
+// ==========================================
+// Handles the browser's speech synthesis independently
+
+const useTextToSpeech = () => {
+  const [isSpeaking, setIsSpeaking] = useState(false);
+
+  const speak = useCallback((text: string, onEnd?: () => void) => {
+    if (!('speechSynthesis' in window)) {
+      alert('Browser does not support TTS');
+      return;
+    }
+
+    // Cancel any current audio
+    window.speechSynthesis.cancel();
+    setIsSpeaking(true);
+
+    const utterance = new SpeechSynthesisUtterance(text);
+    utterance.rate = 1; // Normal speed
+
+    utterance.onend = () => {
+      setIsSpeaking(false);
+      if (onEnd) onEnd();
+    };
+
+    utterance.onerror = () => {
+      setIsSpeaking(false);
+    };
+
+    window.speechSynthesis.speak(utterance);
+  }, []);
+
+  const cancel = useCallback(() => {
+    window.speechSynthesis.cancel();
+    setIsSpeaking(false);
+  }, []);
+
+  return { isSpeaking, speak, cancel };
+};
+
+// ==========================================
+// 3. SUB-COMPONENTS
+// ==========================================
+
+const ChatHeader = () => (
+  <div className="p-4 border-b border-gray-300 flex justify-between items-center bg-gray-50 sticky top-0 z-10 rounded-t-xl">
+    <h1 className="font-bold text-lg text-gray-800">{CONTACT.name}</h1>
+    <span className="text-sm text-green-600 flex items-center">
+      <span className="h-2 w-2 rounded-full bg-green-500 mr-1 animate-pulse"></span>
+      {CONTACT.status}
+    </span>
+  </div>
+);
+
+const MessageList = ({ messages, onSpeakMsg, isSpeaking }: { messages: Message[], onSpeakMsg: (txt: string) => void, isSpeaking: boolean }) => {
   const messagesEndRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [messages]);
+
+  return (
+    <div className="flex-1 overflow-y-auto p-4 space-y-4 bg-white">
+      {messages.map((msg) => (
+        <div key={msg.id} className={`flex w-full ${msg.sender === 'user' ? 'justify-end' : 'justify-start'}`}>
+          <div className={`max-w-[75%] px-4 py-3 rounded-xl shadow-sm relative ${msg.sender === 'user' ? 'bg-blue-600 text-white rounded-br-none' : 'bg-gray-100 text-gray-800 rounded-tl-none border border-gray-200'}`}>
+            <button
+              onClick={() => onSpeakMsg(msg.text)}
+              disabled={isSpeaking}
+              className={`absolute top-0 transform -translate-y-1/2 p-1 rounded-full text-xs shadow-md z-10 ${msg.sender === 'user' ? 'left-0 ml-1 bg-blue-400 text-white' : 'right-0 mr-1 bg-gray-300 text-gray-800'}`}
+            >
+              🔊
+            </button>
+            <p className="text-sm sm:text-base whitespace-pre-wrap mt-2">{msg.text}</p>
+            <p className={`text-xs mt-1 text-right ${msg.sender === 'user' ? 'text-blue-200' : 'text-gray-500'}`}>{msg.time}</p>
+          </div>
+        </div>
+      ))}
+      <div ref={messagesEndRef} />
+    </div>
+  );
+};
+
+// The Modal for Live Conversation
+const LiveConversationModal = ({
+  isOpen,
+  onClose,
+  transcript,
+  listening,
+  isAiSpeaking
+}: {
+  isOpen: boolean;
+  onClose: () => void;
+  transcript: string;
+  listening: boolean;
+  isAiSpeaking: boolean;
+}) => {
+  if (!isOpen) return null;
+
+  return (
+    <div className="fixed inset-0 bg-black bg-opacity-70 flex flex-col items-center justify-center z-50 p-4">
+      <div className="bg-white p-8 rounded-xl shadow-2xl w-full max-w-md space-y-6 text-center">
+        <h2 className="text-xl font-bold text-blue-600">Live Conversation Mode</h2>
+
+        <div className="text-lg font-semibold min-h-10">
+          {listening ? (
+            <span className="text-red-500 animate-pulse flex justify-center gap-2">🔴 Listening...</span>
+          ) : isAiSpeaking ? (
+            <span className="text-green-600 animate-bounce flex justify-center gap-2">🗣️ Tutor Speaking...</span>
+          ) : (
+            <span className="text-gray-500">⏳ Processing...</span>
+          )}
+        </div>
+
+        <div className="bg-gray-100 p-4 rounded-lg border border-gray-300 min-h-80 text-left">
+          <p className="text-xs text-gray-500 mb-1">{listening ? 'You are saying:' : 'Captured:'}</p>
+          <p className="text-gray-800">{transcript || "..."}</p>
+        </div>
+
+        <button onClick={onClose} className="px-6 py-3 bg-red-500 text-white rounded-lg hover:bg-red-600 shadow-md w-full">
+          End Live Chat
+        </button>
+      </div>
+    </div>
+  );
+};
+
+// ==========================================
+// 4. MAIN COMPONENT
+// ==========================================
+
+export default function Home() {
+  // --- States ---
+  const [messages, setMessages] = useState<Message[]>(INITIAL_MESSAGES);
+  const [inputText, setInputText] = useState("");
+  const [mode, setMode] = useState<AppMode>('idle'); // 'idle' | 'dictation' | 'live'
+  const [isProcessing, setIsProcessing] = useState(false); // API loading state
+
+  // --- Hooks ---
+  const { isSpeaking, speak, cancel: cancelSpeech } = useTextToSpeech();
 
   const {
     transcript,
@@ -110,414 +171,219 @@ export default function Home() {
     browserSupportsSpeechRecognition
   } = useSpeechRecognition();
 
-  if (!browserSupportsSpeechRecognition) {
-    console.log("Browser doesn't support speech recognition.");
-  }
+  // --- Logic 1: Handle Dictation & Transcript Sync ---
+  useEffect(() => {
+    // If we are in 'dictation' mode, constantly update the input field
+    if (mode === 'dictation' && listening) {
+      setInputText(transcript);
+    }
+  }, [transcript, mode, listening]);
 
-  // Auto
-  const scrollToBottom = () => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+
+  // --- Logic 2: Live Mode Silence Detection (Auto-Send) ---
+  useEffect(() => {
+    if (mode !== 'live' || !listening || !transcript.trim()) return;
+
+    // Detect silence: If no change in transcript for 1.5s, send the message
+    const timer = setTimeout(() => {
+      handleLiveSubmit(transcript);
+    }, 1500);
+
+    return () => clearTimeout(timer);
+  }, [transcript, mode, listening]);
+
+
+  // --- Logic 3: API & Message Handling ---
+
+  // Mock API Call (Replace with real fetch later)
+  const fetchAIResponse = async (userText: string): Promise<string> => {
+    return new Promise((resolve) => {
+      setTimeout(() => {
+        resolve(`I heard you say: "${userText}". Here is a concept about Oligopoly.`);
+      }, 1000);
+    });
   };
 
-  //text to speak
-  const speakText = (text: string) => {
-    if ('speechSynthesis' in window) {
-      window.speechSynthesis.cancel()
-      setIsSpeaking(true);
-      const utterance = new SpeechSynthesisUtterance(text);
-      utterance.rate = 1.5;
-      utterance.onend = () => {
-        setIsSpeaking(false); // Close the popup
-        if (isTalking) {
-          handleMicRestart();
-        }
-      };
-      utterance.onerror = (event) => {
-        console.error('Speech synthesis error:', event);
-        setIsSpeaking(false); // Close the popup on error
-      };
-      window.speechSynthesis.speak(utterance);
-    } else {
-      alert('Your browser does not support the Web Speech API.');
+  const addMessage = (text: string, sender: 'user' | 'model') => {
+    const newMsg: Message = {
+      id: Date.now(),
+      sender,
+      text,
+      time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+    };
+    setMessages(prev => [...prev, newMsg]);
+  };
+
+  // Triggered manually in Dictation/Idle OR automatically in Live
+  const handleSendMessage = async (text: string) => {
+    if (!text.trim()) return;
+
+    addMessage(text, 'user');
+    setInputText("");
+    resetTranscript();
+    setIsProcessing(true);
+
+    try {
+      const aiResponse = await fetchAIResponse(text);
+      addMessage(aiResponse, 'model');
+      return aiResponse;
+    } catch (e) {
+      addMessage("Error getting response.", 'model');
+      console.log(e);
+      return "Sorry, I encountered an error.";
+    } finally {
+      setIsProcessing(false);
     }
   };
-  const handleMicRestart = () => {
-    setInputText('');
-    resetTranscript();
-    // Only start listening if the modal is still open
-    if (isTalking) {
+
+
+  // --- Logic 4: Orchestration for Live Mode ---
+
+  const handleLiveSubmit = async (text: string) => {
+    SpeechRecognition.stopListening(); // Stop mic while processing
+    const responseText = await handleSendMessage(text);
+
+    if (responseText && mode === 'live') {
+      // Speak the response, then restart mic
+      speak(responseText, () => {
+        // Only restart if we are still in live mode
+        // We use a timeout to prevent instant mic triggering
+        setTimeout(() => {
+          resetTranscript();
+          SpeechRecognition.startListening({ continuous: true });
+        }, 500);
+      });
+    }
+  };
+
+
+  // --- Logic 5: Button Handlers ---
+
+  const toggleDictation = () => {
+    if (mode === 'dictation') {
+      // Stop
+      SpeechRecognition.stopListening();
+      setMode('idle');
+    } else {
+      // Start
+      setMode('dictation');
+      resetTranscript();
+      setInputText("");
+      cancelSpeech(); // Stop any current TTS
       SpeechRecognition.startListening({ continuous: true });
     }
   };
-  const openVoiceModal = () => {
-    setIsTalking(true);
-    // Start listening immediately upon opening
+
+  const startLiveMode = () => {
+    cancelSpeech();
+    setMode('live');
+    resetTranscript();
+    setInputText("");
     SpeechRecognition.startListening({ continuous: true });
   };
-  const closeVoiceModal = () => {
-    // Stop mic
+
+  const stopLiveMode = () => {
     SpeechRecognition.stopListening();
-    //Hide modal
-    setIsTalking(false);
-    // Clear transcript/input text that hasn't been sent
-    setInputText('');
-    resetTranscript();
     cancelSpeech();
-  };
-  const cancelSpeech = () => {
-    if ('speechSynthesis' in window) {
-      window.speechSynthesis.cancel(); // Stop the voice
-      setIsSpeaking(false);       // Close the popup
-    }
-  };
-  useEffect(() => {
-    if (listening) {
-      setInputText(transcript);
-    }
-    // When listening stops, the last recorded transcript stays in inputText until the user sends it or clears it.
-  }, [transcript, listening]);
-  const toggleListening = () => {
-    if (listening) {
-      SpeechRecognition.stopListening();
-    } else {
-      // Clear previous text before starting
-      setInputText('');
-      resetTranscript();
-      SpeechRecognition.startListening({
-        continuous: true,
-      });
-    }
-  };
-  const handleReset = () => {
-    setInputText('');
+    setMode('idle');
     resetTranscript();
   };
 
-
-  useEffect(() => {
-    scrollToBottom();
-  }, [messages, isTyping]);
-  const sendMessageToAI = async (clearInput: boolean) => {
-    const trimmedInput = inputText.trim();
-    if (!trimmedInput) return;
-
-    cancelSpeech();
-
-    const newUserMessage: Message = {
-      id: Date.now(),
-      sender: 'user',
-      text: trimmedInput,
-      time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-    };
-
-    const historyBeforeCall = [...messages, newUserMessage];
-
-    // Update the UI
-    setMessages(historyBeforeCall);
-    if (clearInput) {
-      setInputText("");
-    }
-    setIsTyping(true); //for response
-
-    // Check if this is the very first API call 
-    // (history has the model's initial message + the new user message)
-    const isFirstCall = historyBeforeCall.length === INITIAL_MESSAGES.length + 1;
-
-    //Prepare the payload structure
-    const conversationHistory = historyBeforeCall.map(msg => ({
-      role: msg.sender,
-      parts: [{ text: msg.text }]
-    }));
-
-    //PROMPT STUFFING LOGIC 
-    if (isFirstCall) {
-      // Find the index of the message the user just sent (it should be the last one)
-      const lastMsgIndex = conversationHistory.length - 1;
-      const userOriginalQuestion = conversationHistory[lastMsgIndex].parts[0].text;
-
-      // Construct the "Mega-Prompt"
-      const megaPrompt = `
-${SYSTEM_INSTRUCTION}
-
---- START OF KNOWLEDGE BASE (DETAILED CONTEXT) ---
-${DETAILED_CONTEXT}
---- END OF KNOWLEDGE BASE ---
-
---- USER QUESTION ---
-${userOriginalQuestion}
-      `;
-
-      // Replace the simple user text with the Mega-Prompt in the payload ONLY.
-      // The UI still shows the simple question, but the Model sees the full rules.
-      conversationHistory[lastMsgIndex].parts[0].text = megaPrompt;
-    }
-
-    try {
-      // Call the local API route
-      const response = await fetch("/api/chatLogic", {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json'
-        },
-        // We only send conversationHistory now. The System Instruction is already "stuffed" inside it.
-        body: JSON.stringify({
-          conversationHistory
-        })
-      });
-
-      //Handle the API response
-      const data = await response.json();
-
-      if (response.ok) {
-        const aiReply: Message = {
-          id: Date.now() + 1,
-          sender: 'model',
-          text: data.text,
-          time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-        };
-        setMessages(prev => [...prev, aiReply]);
-        if (isTalking) {
-          speakText(data.text);
-        }
-      } else {
-        console.error("API Call Error:", data.message);
-        const errorMessage: Message = {
-          id: Date.now() + 1,
-          sender: 'model',
-          text: `[Error: ${data.message || 'Could not fetch response.'}]`,
-          time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-        };
-        setMessages(prev => [...prev, errorMessage]);
-      }
-
-    } catch (error) {
-      console.error("Network or Unexpected Error:", error);
-      const networkError: Message = {
-        id: Date.now() + 1,
-        sender: 'model',
-        text: "Network failure. Please check your connection.",
-        time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-      };
-      setMessages(prev => [...prev, networkError]);
-    } finally {
-      setIsTyping(false);
-    }
-
-  }
-  const handleSendMessage = async (e: React.FormEvent<HTMLFormElement>) => {
+  const manualSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    await sendMessageToAI(true);
+    if (mode === 'dictation') toggleDictation(); // Close dictation on send
+    handleSendMessage(inputText);
   };
-  const handleModalSend = async () => {
-    // Stop mic
-    SpeechRecognition.stopListening();
-    await sendMessageToAI(false);
-  };
+
+  // --- Logic 6: Cleanup on Unmount ---
+  useEffect(() => {
+    return () => {
+      cancelSpeech();
+      SpeechRecognition.stopListening();
+    };
+  }, []);
+
+  if (!browserSupportsSpeechRecognition) {
+    return <div>Browser does not support speech recognition.</div>;
+  }
 
   return (
     <div className="flex flex-col h-screen bg-gray-100 font-sans mx-auto max-w-3xl border-x border-gray-200 shadow-xl">
-      {/* Header */}
-      <div className="p-4 border-b border-gray-300 flex justify-between items-center bg-gray-50 sticky top-0 z-10 rounded-t-xl">
-        <h1 className="font-bold text-lg text-gray-800">{CONTACT.name}</h1>
-        <span className="text-sm text-green-600 flex items-center">
-          <span className="h-2 w-2 rounded-full bg-green-500 mr-1 animate-pulse"></span>
-          {CONTACT.status}
-        </span>
-      </div>
 
-      {/* Messages box */}
-      <div className="flex-1 overflow-y-auto p-4 space-y-4 bg-white">
-        {messages.map((msg) => (
-          <div
-            key={msg.id}
-            className={`flex w-full ${msg.sender === 'user' ? 'justify-end' : 'justify-start'}`}
-          >
-            <div
-              className={`max-w-[75%] px-4 py-3 rounded-xl shadow-sm transition-all duration-300 relative
-          ${msg.sender === 'user'
-                  ? 'bg-blue-600 text-white rounded-br-none'
-                  : 'bg-gray-100 text-gray-800 rounded-tl-none border border-gray-200'
-                }`}
-            >
+      <ChatHeader />
 
-              {/* Play Button */}
-              <button
-                onClick={() => speakText(msg.text)} // ⭐️ Key change: Call speakText with message content
-                title="Listen to message"
-                disabled={isSpeaking}
-                className={`absolute top-0 transform -translate-y-1/2 p-1 rounded-full text-xs shadow-md z-10 
-            ${msg.sender === 'user'
-                    ? 'left-0 ml-1 bg-blue-400 hover:bg-blue-300 text-white'
-                    : 'right-0 mr-1 bg-gray-300 hover:bg-gray-400 text-gray-800' // Position based on sender
-                  }`}
-              >
-                🔊 {/* Speaker Icon */}
-              </button>
+      <MessageList
+        messages={messages}
+        onSpeakMsg={(txt) => speak(txt)} // Simple Read Aloud
+        isSpeaking={isSpeaking}
+      />
 
-              {/* Message Content */}
-              <p className="text-sm sm:text-base whitespace-pre-wrap mt-2">{msg.text}</p>
-
-              {/* Time Stamp */}
-              <p className={`text-xs mt-1 ${msg.sender === 'user' ? 'text-blue-200' : 'text-gray-500'} text-right`}>{msg.time}</p>
-            </div>
-          </div>
-        ))}
-
-
-        {isTyping && (
-          <div className="flex justify-start">
-            <div className="max-w-[75%] px-4 py-3 rounded-xl rounded-tl-none bg-gray-100 text-gray-400 text-sm italic shadow-sm animate-pulse">
-              AI is typing...
-            </div>
-          </div>
-        )}
-        <div ref={messagesEndRef} />
-      </div>
-
-      {/* ⭐️ SPEAKING POPUP / MODAL */}
-      {isSpeaking && !isTalking && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-          <div className="bg-white p-6 rounded-lg shadow-2xl flex items-center space-x-4">
-            <span className="text-lg font-semibold text-gray-800">
-              🗣️ Speaking...
-            </span>
-            <button
-              onClick={cancelSpeech} // Calls the function to stop voice and close popup
-              className="px-4 py-2 bg-red-500 text-white rounded-md hover:bg-red-600 transition duration-150 shadow-md"
-            >
-              Cancel
-            </button>
-          </div>
+      {/* Processing Indicator */}
+      {isProcessing && (
+        <div className="px-6 py-2 bg-gray-50 text-xs text-gray-500 italic">
+          AI is thinking...
         </div>
       )}
 
-      {/* Input field */}
+      {/* Bottom Controls */}
       <div className="p-4 border-t border-gray-300 bg-white sticky bottom-0 rounded-b-xl">
-        <form onSubmit={handleSendMessage} className="flex gap-3">
-          {/* 1. Mic Toggle Button */}
-          <button
-            type="button" // Important: Prevents form submission
-            onClick={toggleListening}
-            title={listening ? "Stop Dictation" : "Start Dictation"}
-            disabled={!browserSupportsSpeechRecognition || isTyping}
-            className={`p-3 rounded-xl transition duration-150 shadow-md shrink-0
-              ${!browserSupportsSpeechRecognition || isTyping
-                ? 'bg-gray-200 text-gray-400 cursor-not-allowed'
-                : listening
-                  ? 'bg-red-500 text-white animate-pulse' // Pulsing red when listening
-                  : 'bg-gray-100 text-gray-700 hover:bg-gray-200' // Default gray
-              }`}
-          >
-            {listening ? '🔴' : '🎤'}
-          </button>
+        <form onSubmit={manualSubmit} className="flex gap-2">
 
-          {/* 2. Reset Button */}
-          <button
-            type="button" // Important: Prevents form submission
-            onClick={handleReset}
-            title="Clear Input"
-            disabled={isTyping || !inputText.length}
-            className={`p-3 rounded-xl transition duration-150 shadow-md shrink-0
-              ${isTyping || !inputText.length
-                ? 'bg-gray-200 text-gray-400 cursor-not-allowed'
-                : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-              }`}
-          >
-            ❌
-          </button>
-          {/* ⭐️ NEW: Conversation Mode Button */}
+          {/* 1. Dictation Toggle */}
           <button
             type="button"
-            onClick={openVoiceModal}
-            title="Start Voice Conversation Mode"
-            disabled={isTyping}
-            className={`p-3 rounded-xl transition duration-150 shadow-md shrink-0
-            ${isTyping
-                ? 'bg-gray-200 text-gray-400 cursor-not-allowed'
-                : 'bg-yellow-500 text-white hover:bg-yellow-600'
+            onClick={toggleDictation}
+            title={mode === 'dictation' ? "Stop Dictation" : "Start Dictation"}
+            disabled={mode === 'live' || isProcessing}
+            className={`p-3 rounded-xl transition shadow-md ${mode === 'dictation'
+              ? 'bg-red-500 text-white animate-pulse'
+              : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
               }`}
+          >
+            {mode === 'dictation' ? '🛑' : '🎤'}
+          </button>
+
+          {/* 2. Live Conversation Button */}
+          <button
+            type="button"
+            onClick={startLiveMode}
+            title="Start Live Conversation"
+            disabled={mode !== 'idle' || isProcessing}
+            className={`p-3 rounded-xl transition shadow-md bg-yellow-500 text-white hover:bg-yellow-600 disabled:opacity-50`}
           >
             🗣️
           </button>
 
-
+          {/* 3. Text Input */}
           <input
             type="text"
             value={inputText}
             onChange={(e) => setInputText(e.target.value)}
-            placeholder={isTyping ? "Please wait..." : "Ask me about Oligopoly..."}
-            disabled={isTyping}
-            className="flex-1 p-3 border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 bg-black disabled:bg-gray-200 transition duration-150"
+            placeholder={mode === 'dictation' ? "Listening..." : "Type your message..."}
+            disabled={mode === 'live' || isProcessing}
+            className="flex-1 p-3 border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white transition"
           />
+
+          {/* 4. Send Button */}
           <button
             type="submit"
-            disabled={!inputText.trim() || isTyping}
-            className={`px-6 py-3 rounded-xl font-semibold border transition duration-150 shadow-md
-                        ${!inputText.trim() || isTyping
-                ? 'bg-gray-200 text-gray-400 border-gray-300 cursor-not-allowed'
-                : 'bg-blue-600 text-white border-blue-600 hover:bg-blue-700 active:bg-blue-800'
-              }`}
+            disabled={!inputText.trim() || isProcessing || mode === 'live'}
+            className="px-6 py-3 rounded-xl font-semibold bg-blue-600 text-white hover:bg-blue-700 disabled:bg-gray-300 transition shadow-md"
           >
             Send
           </button>
         </form>
       </div>
-      {/* ⭐️ VOICE CONVERSATION MODAL */}
-      {isTalking && (
-        <div className="fixed inset-0 bg-black bg-opacity-70 flex flex-col items-center justify-center z-50 p-4">
-          <div className="bg-white p-8 rounded-xl shadow-2xl w-full max-w-md space-y-4">
-            <h2 className="text-xl font-bold text-center text-blue-600">
-              Turn-Taking Conversation Mode
-            </h2>
 
-            <p className="text-center text-gray-700 font-semibold flex items-center justify-center space-x-2">
-              {listening ? (
-                <>
-                  <span className="animate-pulse text-red-500">🔴</span>
-                  <span>Listening... Speak your question now.</span>
-                </>
-              ) : isSpeaking ? (
-                <>
-                  <span className="animate-bounce text-green-600">🗣️</span>
-                  <span>Tutor is speaking...</span>
-                </>
-              ) : (
-                <>
-                  <span className="text-gray-500">...</span>
-                  <span>Processing response.</span>
-                </>
-              )}
-            </p>
+      {/* Live Mode Modal Overlay */}
+      <LiveConversationModal
+        isOpen={mode === 'live'}
+        onClose={stopLiveMode}
+        transcript={transcript}
+        listening={listening}
+        isAiSpeaking={isSpeaking}
+      />
 
-            <div className="bg-gray-100 p-4 rounded-lg border border-gray-300 min-h-[50px] overflow-auto max-h-40">
-              <p className="text-sm text-gray-800 whitespace-pre-wrap">
-                {listening ? 'Your Dictation:' : 'Input captured:'} {inputText}
-              </p>
-            </div>
-
-            <div className="flex justify-around pt-4">
-              <button
-                onClick={closeVoiceModal} // Uses the cancel logic
-                className="px-6 py-3 bg-red-500 text-white rounded-lg hover:bg-red-600 transition shadow-md"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={handleModalSend}
-                // Disable if not listening or if there's no text captured
-                disabled={!inputText.trim() || isTyping || isSpeaking}
-                className={`px-6 py-3 rounded-lg font-semibold transition shadow-md
-                        ${!inputText.trim() || isTyping || isSpeaking
-                    ? 'bg-gray-400 text-white cursor-not-allowed'
-                    : 'bg-green-600 text-white hover:bg-green-700'
-                  }`}
-              >
-                Send
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 }

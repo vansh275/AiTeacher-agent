@@ -9,11 +9,21 @@
     "lint": "eslint"
   },
   "dependencies": {
+    "@chroma-core/default-embed": "^0.1.9",
+    "@google/genai": "^1.33.0",
+    "chromadb": "^3.1.7",
+    "mammoth": "^1.11.0",
+    "mic": "^2.1.2",
     "next": "16.0.3",
+    "node-fetch": "^3.3.2",
+    "pdf-parse": "^2.4.5",
     "postcss": "^8.5.6",
     "react": "19.2.0",
     "react-dom": "19.2.0",
-    "react-speech-recognition": "^4.0.1"
+    "react-speech-recognition": "^4.0.1",
+    "speak-tts": "^2.0.8",
+    "speaker": "^0.5.5",
+    "tiktoken": "^1.0.22"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4.1.17",
@@ -23,6 +33,7 @@
     "eslint": "^9",
     "eslint-config-next": "16.0.3",
     "tailwindcss": "^4.1.17",
+    "ts-node": "^10.9.2",
     "typescript": "^5"
   }
 }
