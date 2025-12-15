@@ -23,7 +23,8 @@
     "react-speech-recognition": "^4.0.1",
     "speak-tts": "^2.0.8",
     "speaker": "^0.5.5",
-    "tiktoken": "^1.0.22"
+    "tiktoken": "^1.0.22",
+    "wav": "^1.0.2"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4.1.17",

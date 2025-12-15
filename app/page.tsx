@@ -19,7 +19,12 @@ type AppMode = 'idle' | 'dictation' | 'live';
 const CONTACT = { id: 1, name: "Economics Tutor (Oligopoly)", status: "Online" };
 
 const INITIAL_MESSAGES: Message[] = [
-  { id: 1, sender: 'model', text: "Welcome! I am your tutor on the topic of Oligopoly. Ask me anything.", time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) },
+  {
+    id: 1,
+    sender: 'model',
+    text: "Welcome! I am your tutor on the topic of Oligopoly. Ask me anything.",
+    time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+  },
 ];
 
 // ==========================================
@@ -42,6 +47,10 @@ const useTextToSpeech = () => {
 
     const utterance = new SpeechSynthesisUtterance(text);
     utterance.rate = 1; // Normal speed
+
+    // Optional: Select a specific voice if desired
+    // const voices = window.speechSynthesis.getVoices();
+    // utterance.voice = voices[0]; 
 
     utterance.onend = () => {
       setIsSpeaking(false);
@@ -160,7 +169,8 @@ export default function Home() {
   const [inputText, setInputText] = useState("");
   const [mode, setMode] = useState<AppMode>('idle'); // 'idle' | 'dictation' | 'live'
   const [isProcessing, setIsProcessing] = useState(false); // API loading state
-
+  const [currentAudio, setCurrentAudio] = useState<HTMLAudioElement | null>(null);
+  const [wantAiVoice, setWantAiVoice] = useState<boolean>(false);
   // --- Hooks ---
   const { isSpeaking, speak, cancel: cancelSpeech } = useTextToSpeech();
 
@@ -170,6 +180,43 @@ export default function Home() {
     resetTranscript,
     browserSupportsSpeechRecognition
   } = useSpeechRecognition();
+
+  // Helper function to decode and play Base64 audio
+  const playBase64Audio = (
+    base64String: string,
+    mimeType: string,
+    onEnded: () => void,
+    onPlay: (audio: HTMLAudioElement) => void // 💡 NEW: Callback to save the audio object
+  ): boolean => {
+    try {
+      // ... (Base64 decoding logic remains the same) ...
+      const binaryString = atob(base64String);
+      const len = binaryString.length;
+      const bytes = new Uint8Array(len);
+      for (let i = 0; i < len; i++) {
+        bytes[i] = binaryString.charCodeAt(i);
+      }
+
+      const audioBlob = new Blob([bytes], { type: mimeType });
+      const audioUrl = URL.createObjectURL(audioBlob);
+
+      const audio = new Audio(audioUrl);
+      audio.onended = onEnded;
+
+      audio.play().then(() => {
+        // 💡 Call the onPlay callback when playback successfully starts
+        onPlay(audio);
+      }).catch(e => {
+        console.error("Error playing audio:", e);
+        onEnded();
+      });
+      return true;
+    } catch (e) {
+      console.error("Error decoding or playing Base64 audio:", e);
+      onEnded();
+      return false;
+    }
+  };
 
   // --- Logic 1: Handle Dictation & Transcript Sync ---
   useEffect(() => {
@@ -195,13 +242,49 @@ export default function Home() {
 
   // --- Logic 3: API & Message Handling ---
 
-  // Mock API Call (Replace with real fetch later)
-  const fetchAIResponse = async (userText: string): Promise<string> => {
-    return new Promise((resolve) => {
-      setTimeout(() => {
-        resolve(`I heard you say: "${userText}". Here is a concept about Oligopoly.`);
-      }, 1000);
-    });
+  /**
+   * REAL API CALL
+   * Sends the conversation history to the backend Next.js API route.
+   */
+  const fetchAIResponse = async (currentHistory: Message[]): Promise<{ text: string, audioBase64?: string, audioMimeType?: string }> => {
+
+    try {
+      // 1. Map frontend Message format to Backend Gemini format
+      // Backend expects: { role: 'user' | 'model', parts: [{ text: string }] }
+      const historyPayload = currentHistory.map((msg) => ({
+        role: msg.sender,
+        parts: [{ text: msg.text }]
+      }));
+
+      // 2. Make the POST request
+      const wantAudio = mode === 'live' && wantAiVoice;
+      // IMPORTANT: Ensure your backend file is at app/api/chat/route.ts
+      const response = await fetch('/api/chatLogic', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ conversationHistory: historyPayload, wantAudio: wantAudio }),
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.message || data.text || 'API Error');
+      }
+      return {
+        text: data.responseText || data.text,
+        audioBase64: data.audioData,
+        audioMimeType: data.audioMimeType
+      };
+
+    } catch (error) {
+      console.error("Fetch Error:", error);
+      return {
+        text: "I apologize, but I am unable to connect to the server right now.",
+        audioBase64: undefined
+      };
+    }
   };
 
   const addMessage = (text: string, sender: 'user' | 'model') => {
@@ -215,22 +298,38 @@ export default function Home() {
   };
 
   // Triggered manually in Dictation/Idle OR automatically in Live
-  const handleSendMessage = async (text: string) => {
-    if (!text.trim()) return;
+  const handleSendMessage = async (text: string): Promise<{ text: string, audioBase64?: string, audioMimeType?: string } | null> => {
+    if (!text.trim()) return null;
 
-    addMessage(text, 'user');
+    // 1. Create the new user message object
+    const newUserMsg: Message = {
+      id: Date.now(),
+      sender: 'user',
+      text: text,
+      time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+    };
+
+    // 2. Optimistically update UI
+    setMessages(prev => [...prev, newUserMsg]);
     setInputText("");
     resetTranscript();
     setIsProcessing(true);
 
     try {
-      const aiResponse = await fetchAIResponse(text);
-      addMessage(aiResponse, 'model');
+      // 3. Create a temporary history array that INCLUDES the new message.
+      // We cannot use 'messages' state directly here because the setState above is async 
+      // and might not have updated by the time we call fetch.
+      const conversationHistory = [...messages, newUserMsg];
+
+      // 4. Call API with full history
+      const aiResponse = await fetchAIResponse(conversationHistory);
+
+      addMessage(aiResponse.text, 'model');
       return aiResponse;
     } catch (e) {
       addMessage("Error getting response.", 'model');
       console.log(e);
-      return "Sorry, I encountered an error.";
+      return null;
     } finally {
       setIsProcessing(false);
     }
@@ -241,11 +340,22 @@ export default function Home() {
 
   const handleLiveSubmit = async (text: string) => {
     SpeechRecognition.stopListening(); // Stop mic while processing
-    const responseText = await handleSendMessage(text);
+    const audioResponse = await handleSendMessage(text);
+    if (!audioResponse) return;
 
-    if (responseText && mode === 'live') {
-      // Speak the response, then restart mic
-      speak(responseText, () => {
+    if (!wantAiVoice) {
+      setTimeout(() => {
+        speak(audioResponse.text, () => {
+          setTimeout(() => {
+            resetTranscript();
+            SpeechRecognition.startListening({ continuous: true });
+          })
+        })
+      })
+      return;
+    }
+    if (!audioResponse?.audioBase64 && mode === 'live') {
+      speak("couldn't connect to the api", () => {
         // Only restart if we are still in live mode
         // We use a timeout to prevent instant mic triggering
         setTimeout(() => {
@@ -253,6 +363,46 @@ export default function Home() {
           SpeechRecognition.startListening({ continuous: true });
         }, 500);
       });
+      return null;
+    }
+    if (!audioResponse?.audioBase64 && !audioResponse?.audioMimeType) {
+      return;
+    }
+    const { audioBase64, audioMimeType } = audioResponse;
+    // 2. Audio Playback Logic
+    if (audioBase64 && audioMimeType) {
+
+      const audioPlaybackCallback = () => {
+        // This runs when the audio FINISHES playing
+        setCurrentAudio(null); // Clear the reference
+        setIsProcessing(false); // Finished processing
+
+        // Restart mic after a short delay
+        setTimeout(() => {
+          resetTranscript();
+          SpeechRecognition.startListening({ continuous: true });
+        }, 500);
+      };
+
+      const onAudioPlay = (audioInstance: HTMLAudioElement) => {
+        // This runs when the audio STARTS playing
+        setCurrentAudio(audioInstance); // Save the audio instance to state
+      };
+
+      playBase64Audio(
+        audioBase64,
+        audioMimeType,
+        audioPlaybackCallback,
+        onAudioPlay // Pass the new handler
+      );
+
+    } else {
+      // Fallback if audio wasn't generated
+      setIsProcessing(false);
+      setTimeout(() => {
+        resetTranscript();
+        SpeechRecognition.startListening({ continuous: true });
+      }, 500);
     }
   };
 
@@ -273,7 +423,9 @@ export default function Home() {
       SpeechRecognition.startListening({ continuous: true });
     }
   };
-
+  const toggleWantAiVoice = () => {
+    setWantAiVoice(prev => !prev);
+  }
   const startLiveMode = () => {
     cancelSpeech();
     setMode('live');
@@ -301,7 +453,7 @@ export default function Home() {
       cancelSpeech();
       SpeechRecognition.stopListening();
     };
-  }, []);
+  }, [cancelSpeech]);
 
   if (!browserSupportsSpeechRecognition) {
     return <div>Browser does not support speech recognition.</div>;
@@ -353,6 +505,15 @@ export default function Home() {
           >
             🗣️
           </button>
+          <button
+            type="button"
+            onClick={toggleWantAiVoice}
+            title="change voice type"
+            className={`p-3 rounded-xl transition shadow-md border-2 ${wantAiVoice ? "border-green-500" : "border-black"
+              }`}
+          >
+            👄
+          </button>
 
           {/* 3. Text Input */}
           <input
@@ -381,7 +542,7 @@ export default function Home() {
         onClose={stopLiveMode}
         transcript={transcript}
         listening={listening}
-        isAiSpeaking={isSpeaking}
+        isAiSpeaking={isSpeaking || currentAudio !== null}
       />
 
     </div>

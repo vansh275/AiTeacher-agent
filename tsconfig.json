@@ -40,7 +40,8 @@
     ".next/dev/types/**/*.ts",
     "**/*.mts",
     "types/**/*.d.ts",
-    "**/*.d.ts"
+    "**/*.d.ts",
+    "app/api/textToSpeech/route.js"
   ],
   "exclude": [
     "node_modules"

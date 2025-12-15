@@ -1,10 +1,11 @@
 import { NextResponse } from "next/server";
 // Import the context and instructions from the new file
 import { DETAILED_CONTEXT, SYSTEM_INSTRUCTION } from "../../knowledge_base"; // Note the relative path might need adjustment based on where you place knowledge_base.ts
-
+import { generateAudioBuffer } from "../textToSpeech/route";
 export async function POST(req: Request) {
     const body = await req.json();
     const { conversationHistory } = body;
+    const { wantAudio } = body;
 
     const API = process.env.GEMINI_API_KEY;
     const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${API}`;
@@ -67,6 +68,22 @@ Based ONLY on the KNOWLEDGE BASE and your role as a tutor, respond to the last U
         }
 
         const generatedText: string = data.candidates?.[0]?.content?.parts?.[0]?.text || "I apologize, I couldn't generate a response.";
+        if (wantAudio) {
+            // 2. Generate the Audio Buffer
+            const wavBuffer = await generateAudioBuffer(generatedText);
+            // 3. Convert the WAV Buffer to a Base64 string for safe JSON transmission
+            const audioBase64 = wavBuffer.toString('base64');
+
+            // 4. Return the Base64 string and metadata in your JSON response
+            return new Response(JSON.stringify({
+                text: generatedText,
+                audioData: audioBase64,
+                audioMimeType: 'audio/wav',
+            }), {
+                status: 200,
+                headers: { 'Content-Type': 'application/json' },
+            });
+        }
         // console.log("res aya ", generatedText);
         return NextResponse.json(
             { text: generatedText },
